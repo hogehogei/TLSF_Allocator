@@ -19,6 +19,8 @@
 #endif
 
 
+// gcc以外の場合などでMSB/LSBを求めるときのテーブル
+#if 0
 static const int table[] = {
     -1, 0, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4,
     4, 4,
@@ -45,6 +47,7 @@ static const int table[] = {
     7,
     7, 7, 7, 7, 7, 7, 7
 };
+#endif
 
 namespace exlib
 {
@@ -86,8 +89,9 @@ public:
         // prev/next のリンクポインタなどは、Freeブロックのリストを管理するときにしか使わないので
         // 実データを置く領域を間借りして使うようにして
         // メモリのオーバヘッドを削減している
-        uint32_t header_overwrap = static_cast<uint32_t>( sizeof(BoundaryTagBegin) - BoundaryTagBegin::skHeaderOverhead );
-        uint32_t min_alloc_size = std::max( (1 << mSLIPartitionBits) + skAlignment, header_overwrap );  
+        uint32_t linkptr_overwrap = static_cast<uint32_t>( sizeof(BoundaryTagBegin) - BoundaryTagBegin::skHeaderOverhead );
+        uint32_t min_user_mem = mSLIPartition;    // 16byte
+        uint32_t min_alloc_size = std::max( min_user_mem, linkptr_overwrap );  // 前後リンクポインタのサイズかユーザメモリのどちらか大きい方
         mMinAllocSize = getAlignmentedSize( min_alloc_size );
         assert( buffer_size > mMinAllocSize && "buffer_size too small!" );
 
@@ -98,7 +102,9 @@ public:
         // 管理領域タグ作成
         mPoolMemSize = buf_alloc_size + BoundaryTagBegin::skBlockOverhead + sizeof(BoundaryTagBegin);
         mPoolMem = new uint8_t[mPoolMemSize];
-        
+
+        // +1しているのは配列が0originだから
+        // 配列操作時に getMSBの値をそのまま利用するため
         mFreeBlock = std::vector<BoundaryTagBegin*>( (getMSB( mPoolMemSize )+1) * mSLIPartition, nullptr );
         mFreeListBitFLI = 0;
         mFreeListBitSLI = std::vector<uint32_t>( getMSB( mPoolMemSize )+1, 0 );
@@ -110,7 +116,7 @@ public:
         BoundaryTagBegin* dummy_end = new(p) BoundaryTagBegin(0);
         dummy_end->setUsed( true );
         
-        // create header
+        // 本物の未使用領域のヘッダ
         p = mPoolMem;
         BoundaryTagBegin* beg = newTag( buf_alloc_size, p );
         registerFreeBlock( beg );
@@ -220,6 +226,11 @@ public:
         } while( size != 0 );
     }
    
+
+    
+private:
+
+    // debug用
     void printBit( uint32_t v )
     {
         std::cout << "31 : ";
@@ -236,19 +247,12 @@ public:
         std::cout << std::endl;
     }
     
-private:
-
-   
     unsigned getMSB( uint32_t v )
     {
         //uint32_t a;
         //uint32_t x = v;
         //a = x <= 0xFFFF ? (x <= 0xFF ? 0 : 8) : (x <= 0xFFFFFF ? 16 : 24);
         //return table[x >> a] + a;
-
-        //uint32_t msb;
-        //asm( "bsrl %1,%0" : "=r"(msb) : "r"(v));
-        //return msb;
         
         return 31 - __builtin_clz(v);
     }
@@ -259,22 +263,22 @@ private:
         //uint32_t x = v & -v;
         //a = x <= 0xFFFF ? (x <= 0xFF ? 0 : 8) : (x <= 0xFFFFFF ? 16 : 24);
         //return table[x >> a] + a;
+        
         return __builtin_ctz(v);
     }
     
     unsigned calcFreeBlockIndex( unsigned FLI, unsigned SLI )
     {
-        //return FLI * mSLIPartition + SLI;
         return (FLI << mSLIPartitionBits) + SLI;
     }
     
     unsigned getSecondLevelIndex( uint32_t size, unsigned msb )
     {
-        //assert( msb >= mMinAllocSize && "msb too small!" );
-//        const unsigned mask = (1 << msb) - 1;
-//        return (size & mask) >> rs;
-//
-        int rs = msb - mSLIPartitionBits; 
+        int rs = msb - mSLIPartitionBits;
+        
+//      これと同様
+//      const unsigned mask = (1 << msb) - 1;
+//      return (size & mask) >> rs;
         return (size >> rs) & (mSLIPartition - 1);
     }
     
@@ -305,13 +309,13 @@ private:
         
         return size;
     }
-    
+
     void getIndex( unsigned v, unsigned* fli, unsigned* sli )
     {
         *fli = getMSB( v );
         *sli = getSecondLevelIndex( v, *fli );
     }
-    
+
     void clearBit( unsigned index, unsigned fli, unsigned sli )
     {
         assert( index == calcFreeBlockIndex( fli, sli ) && "IT MUST BE BUG" );
@@ -328,34 +332,34 @@ private:
     {
         DEBUG_PRINT_FUNCNAME();
 
-        unsigned FLI, SLI;
-        getIndex( alloc_size, &FLI, &SLI );
-        unsigned index = calcFreeBlockIndex( FLI, SLI );
+        unsigned fli, sli;
+        getIndex( alloc_size, &fli, &sli );
+        unsigned index = calcFreeBlockIndex( fli, sli );
         
         BoundaryTagBegin* b = mFreeBlock[index];
         
         if( !b ){
-            if( !getMinFreeListBit( SLI+1, mFreeListBitSLI[FLI], &SLI ) ){
-                if( !getMinFreeListBit( FLI+1, mFreeListBitFLI, &FLI ) ){
+            if( !getMinFreeListBit( sli+1, mFreeListBitSLI[fli], &sli ) ){
+                if( !getMinFreeListBit( fli+1, mFreeListBitFLI, &fli ) ){
                     return 0;   // no memory!
                 }
                 
-                if( !getMinFreeListBit( 0, mFreeListBitSLI[FLI], &SLI ) ){
+                if( !getMinFreeListBit( 0, mFreeListBitSLI[fli], &sli ) ){
                     printMemoryList();
                     assert( 0 && "IT MUST BE BUG!" );
                 }
             }
 
-            index = calcFreeBlockIndex( FLI, SLI );
+            index = calcFreeBlockIndex( fli, sli );
             b = mFreeBlock[index];
         }
         
         assert( b && "Invalid pointer in FreeBlockList. IT MUST BE BUG" );
         mFreeBlock[index] = b->nextLink();
         b->detach();
-    
+
         // update freelist bit
-        clearBit( index, FLI, SLI );
+        clearBit( index, fli, sli );
         DEBUG_PRINT_BLOCKINFO(b);
 
         return b;
@@ -404,20 +408,14 @@ private:
         getIndex( memsize, &fli, &sli );
 
         index = calcFreeBlockIndex( fli, sli ) - 1;
-       
+
         // フリーリストに追加
         if( mFreeBlock[index] ){
-            //std::cout << "add free list. " << std::endl;
             freeblock->setNextLink( mFreeBlock[index] );
             mFreeBlock[index]->setPrevLink( freeblock );
             mFreeBlock[index] = freeblock;
 
             freeblock->setPrevLink( nullptr );
-            //BoundaryTagBegin* p = freeblock;
-            //while( p  ){
-            //   std::cout << "blocklist size: " << p->size() << ' ' << (uint32_t*)p << std::endl;
-            //   p = p->nextLink();
-            //}
          }
         else {
             fli = index >> mSLIPartitionBits;
@@ -470,13 +468,13 @@ private:
         if( !b ){
             return;
         }
-    
+
         assert( b->isUsed() && "Double free! IT MUST BE BUG" ); 
         assert( mPoolMem <= (uint8_t*)b && "IT MUST BE BUG" );
         assert( (mPoolMem + mPoolMemSize - sizeof(BoundaryTagBegin)) > (uint8_t*)b && "IT MUST BE BUG" );
-        
+
         BoundaryTagBegin* block = b;
-        
+
         block->setUsed( false );
         block = mergeFreeBlockPrevNext( block );
         registerFreeBlock( block );

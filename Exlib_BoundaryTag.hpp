@@ -14,7 +14,7 @@ namespace exlib
 
 //class BoundaryTagEnd;
 /**
- * @brief  TLSFアロケータ用　メモリブロックエンドヘッダ
+ * @brief  TLSFアロケータ用  メモリブロックエンドヘッダ
  **/
 class BoundaryTagEnd 
 {
@@ -27,10 +27,7 @@ public:
     
     //!  管理するメモリブロックサイズ
     void setSize( uint32_t size );
-    /**
-     * @retval  使用中メモリブロックならtrue
-     **/
-    //bool isUsed() const;
+
     /**
      * @retval  メモリブロックサイズ
      **/
@@ -63,7 +60,6 @@ public:
     }
     void setSize( uint32_t size )
     {
-        //assert( size <= 0x7FFFFFFF && "Over maximum memory size!" ); 
         mHeader.size = size;
     }
 
@@ -99,8 +95,8 @@ public:
     struct Header {
         Header() : size(0), is_used(0) {}
 
-        uint32_t size;     //! メモリブロック使用中？
-        uint32_t is_used;  //! 管理するメモリブロックサイズ
+        uint32_t size;     //! 管理するメモリブロックサイズ
+        uint32_t is_used;  //! メモリブロック使用中？
     };
 
     static const int skHeaderOverhead = sizeof(BoundaryTagBegin::Header);

@@ -11,7 +11,7 @@
 // 
 
 // 標準の new と カスタムアロケータどちらから確保するか
-#define   ALLOC_CUSTOM_ALLOCATOR
+//#define   ALLOC_CUSTOM_ALLOCATOR
 
 int main( int argc, char** argv )
 {
@@ -40,7 +40,7 @@ int main( int argc, char** argv )
         int alloc_size = dice(mt);
         if( alloc_size % 3 == 0 && i > 0 ){
             --i;
-            // std::cout << alloc_size << ' ' << "dealloc : " << (int*)p_list[i] << ' ' << alloc_size << std::endl;
+
 #ifdef   ALLOC_CUSTOM_ALLOCATOR
             allocator.deallocate( p_list[i] );
 #else
@@ -49,7 +49,7 @@ int main( int argc, char** argv )
             continue;
         }
         
-        //std::cout << "allocate No: " << i << ' ' << alloc_size << std::endl;
+        
 #ifdef   ALLOC_CUSTOM_ALLOCATOR
         p_list[i] = reinterpret_cast<char*>( allocator.allocate(alloc_size) );
 #else
@@ -61,10 +61,8 @@ int main( int argc, char** argv )
 
         // メモリの空きがなく確保に失敗したか、メモリリストいっぱいなら一斉に解放
         if( !p_list[i] || i >= 5119 ){
-            //std::cout << "deallocate all " << std::endl;
-            //allocator.printMemoryList();
+
             for( int j = 0; j <= i; ++j ){
-                //std::cout << "dealloc : " << (int*)p_list[j]  << ' ' << j << std::endl;
 #ifdef   ALLOC_CUSTOM_ALLOCATOR
                 allocator.deallocate( p_list[j] );
 #else
@@ -78,7 +76,10 @@ int main( int argc, char** argv )
         ++i;
     }
 
-    //allocator.printMemoryList();
+#ifdef    ALLOC_CUSTOM_ALLOCATOR
+    allocator.printMemoryList();
+#endif
+    
     std::cout << "Allocation count : " << alloc_count << std::endl;
 
     return 0;
